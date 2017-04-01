@@ -1,5 +1,6 @@
 import java.math.BigInteger;
 import java.sql.Date;
+import java.sql.Timestamp;
 import java.text.SimpleDateFormat;
 import java.time.Duration;
 import java.time.LocalDate;
@@ -17,12 +18,19 @@ import java.util.TreeSet;
 
 import com.datastax.driver.core.BoundStatement;
 import com.datastax.driver.core.Cluster;
+import com.datastax.driver.core.CodecRegistry;
 import com.datastax.driver.core.ExecutionInfo;
 import com.datastax.driver.core.PreparedStatement;
 import com.datastax.driver.core.ProtocolVersion;
 import com.datastax.driver.core.QueryTrace;
 import com.datastax.driver.core.ResultSet;
 import com.datastax.driver.core.Session;
+import com.datastax.driver.core.TableMetadata;
+import com.datastax.driver.core.TypeCodec;
+import com.datastax.driver.core.UDTValue;
+import com.datastax.driver.core.UserType;
+import com.datastax.driver.mapping.Mapper;
+import com.datastax.driver.mapping.MappingManager;
 import com.datastax.driver.mapping.annotations.Column;
 import com.datastax.driver.mapping.annotations.Field;
 import com.datastax.driver.mapping.annotations.PartitionKey;
@@ -38,113 +46,15 @@ public class CassandraTester {
 
 	private static final Map<String, PreparedStatement> cachedStatements = new HashMap<>();
 	public static final Random random = new Random();
-
-	public static class Actor{
-		public int id;
-		public String name;
-		public int age;
-		public Actor(int i, String n, int a){
-			this.id = i;
-			this.name = n;
-			this.age = a;
-		}
-	}
-	
-	public static class Movie {
-		public int id;
-		public String name;
-		public LocalDate date;
-		public ArrayList<Actor> acts;
-		public Movie(int i, String n, LocalDate d){
-			this.id = i;
-			this.name = n;
-			this.date = d;
-		}
-	}
-	
-	@UDT(keyspace = KEYSPACE, name = TABLENAME)
-	public class ActorCassandra {
-		public ActorCassandra(int id, String name, int age) {
-			super();
-			this.id = id;
-			this.name = name;
-			this.age = age;
-		}
-		public ActorCassandra(){}
-		@Field(name = "id")
-		private int id;
-		@Field(name = "name")
-		private String name;
-		@Field(name = "age")
-		private int age;
-		public int getId() {
-			return id;
-		}
-		public void setId(int id) {
-			this.id = id;
-		}
-		public String getName() {
-			return name;
-		}
-		public void setName(String name) {
-			this.name = name;
-		}
-		public int getAge() {
-			return age;
-		}
-		public void setAge(int age) {
-			this.age = age;
-		}
-		@Override
-		public String toString() {
-			return "MovieCassandra [id=" + id + ", name=" + name + ", age=" + age + "]";
-		}
-	}
-	
-//	@Table(keyspace = KEYSPACE, name = TABLENAME)
-//	public static class MovieCassandra {
-//		@PartitionKey
-//	    @Column(name = "id")
-//	    private int id;
-//	    @Column(name = "name")
-//	    private String name;
-//	    @Column(name = "online_date")
-//	    private LocalDate date;
-//	    @Column(name = "act_list")
-//	    private List<ActorCassandra> act;
-//	    public int getId() {
-//			return id;
-//		}
-//		public void setId(int id) {
-//			this.id = id;
-//		}
-//		public String getName() {
-//			return name;
-//		}
-//		public void setName(String name) {
-//			this.name = name;
-//		}
-//		public LocalDate getDate() {
-//			return date;
-//		}
-//		public void setDate(LocalDate date) {
-//			this.date = date;
-//		}
-//		public MovieCassandra(
-//		public MovieCassandra(int id, String name, LocalDate date, List<ActorCassandra> act) {
-//			super();
-//			this.id = id;
-//			this.name = name;
-//			this.date = date;
-//			this.act = act;
-//		}
-//	}
 	
 	public static void main(String[] args) {
 		// TODO Auto-generated method stub
+		CodecRegistry codecRegistry = new CodecRegistry();
 
 		Cluster cluster = Cluster.builder().addContactPoints(CASSANDRA_SERVER)
-				.withProtocolVersion(ProtocolVersion.NEWEST_SUPPORTED).build();
+				.withProtocolVersion(ProtocolVersion.NEWEST_SUPPORTED)
+				.withCodecRegistry(codecRegistry)
+				.build();
 
 		try (Session session = cluster.connect()) {
 			executeStatement(session, dropSchema());
@@ -155,6 +65,11 @@ public class CassandraTester {
 			e.printStackTrace();
 		}
 
+		UserType actorType = cluster.getMetadata().getKeyspace(KEYSPACE).getUserType(TYPENAME);
+		TypeCodec<UDTValue> actorTypeCodec = codecRegistry.codecFor(actorType);
+		ActorCodec actorCodec = new ActorCodec(actorTypeCodec, Actor.class);
+		codecRegistry.register(actorCodec);
+		
 		long start, stop, diff;
 		// CREATE DATA
 		try (Session session = cluster.connect()) {
@@ -165,14 +80,19 @@ public class CassandraTester {
 
 			start = System.nanoTime();
 			for(int i = 0; i < ENTRY_COUNT; i++){
-				Movie m = new Movie(i + 1, movieNames.get(i), dates.get(i));
+				List<Object> values = new ArrayList<>();
+				values.add(i);
+				values.add(movieNames.get(i));
+				values.add(Timestamp.valueOf(dates.get(i).atStartOfDay()));
+				
 				ArrayList<Actor> act = new ArrayList<>();
 				Actor a1 = new Actor(2 * i, actNames.get(2 * i), ages.get(2 * i));
 				Actor a2 = new Actor(2 * i + 1, actNames.get(2 * i + 1), ages.get(2 * i + 1));
 				act.add(a1);
 				act.add(a2);
-				m.acts = act;
-				executeStatement(session, createInsertStatement(), m);
+				
+				values.add(act);
+				executeStatement(session, createInsertStatement(), values.toArray());
 			}
 
 			stop = System.nanoTime();
@@ -308,7 +228,7 @@ public class CassandraTester {
 	
 	public static String createTable() {
 		String schema = "CREATE TABLE " + KEYSPACE + "." + TABLENAME + " (" + "id int," + "name ascii,"
-				+ "online_date timestamp," + "act_list list<frozen <act_info>>," + "PRIMARY KEY (id, name)) ";
+				+ "online_date timestamp," + "act_list list<frozen <" + TYPENAME + ">>," + "PRIMARY KEY (id, name)) ";
 
 		System.err.println("Creating schema:\n" + schema);
 
