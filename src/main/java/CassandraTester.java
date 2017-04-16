@@ -41,20 +41,18 @@ public class CassandraTester {
 	public static final String CASSANDRA_SERVER = "127.0.0.1";
 	public static final String KEYSPACE = "perf_test";
 	public static final String TABLENAME = "movie";
-	public static final int ENTRY_COUNT = 10;
+	public static final int ENTRY_COUNT = 10000;
 	public static final String TYPENAME = "act_info";
 
 	private static final Map<String, PreparedStatement> cachedStatements = new HashMap<>();
 	public static final Random random = new Random();
-	
+
 	public static void main(String[] args) {
 		// TODO Auto-generated method stub
 		CodecRegistry codecRegistry = new CodecRegistry();
 
 		Cluster cluster = Cluster.builder().addContactPoints(CASSANDRA_SERVER)
-				.withProtocolVersion(ProtocolVersion.NEWEST_SUPPORTED)
-				.withCodecRegistry(codecRegistry)
-				.build();
+				.withProtocolVersion(ProtocolVersion.NEWEST_SUPPORTED).withCodecRegistry(codecRegistry).build();
 
 		try (Session session = cluster.connect()) {
 			executeStatement(session, dropSchema());
@@ -69,50 +67,88 @@ public class CassandraTester {
 		TypeCodec<UDTValue> actorTypeCodec = codecRegistry.codecFor(actorType);
 		ActorCodec actorCodec = new ActorCodec(actorTypeCodec, Actor.class);
 		codecRegistry.register(actorCodec);
-		
+
+		ArrayList<String> movieNames = generateMovieNames();
+		ArrayList<String> actNames = generateActNames();
+		ArrayList<Integer> ages = generateAges();
+		ArrayList<LocalDate> dates = generateDates();
+
 		long start, stop, diff;
 		// CREATE DATA
 		try (Session session = cluster.connect()) {
-			ArrayList<String> movieNames = generateMovieNames();
-			ArrayList<String> actNames = generateActNames();
-			ArrayList<Integer> ages = generateAges();
-			ArrayList<LocalDate> dates = generateDates();
 
 			start = System.nanoTime();
-			for(int i = 0; i < ENTRY_COUNT; i++){
+			for (int i = 0; i < ENTRY_COUNT; i++) {
 				List<Object> values = new ArrayList<>();
 				values.add(i);
 				values.add(movieNames.get(i));
 				values.add(Timestamp.valueOf(dates.get(i).atStartOfDay()));
-				
+
 				ArrayList<Actor> act = new ArrayList<>();
 				Actor a1 = new Actor(2 * i, actNames.get(2 * i), ages.get(2 * i));
 				Actor a2 = new Actor(2 * i + 1, actNames.get(2 * i + 1), ages.get(2 * i + 1));
 				act.add(a1);
 				act.add(a2);
-				
+
 				values.add(act);
 				executeStatement(session, createInsertStatement(), values.toArray());
 			}
 
 			stop = System.nanoTime();
 			diff = stop - start;
-			System.err.println("Data created in " + diff);
+			System.err.println("Data created in " + diff / 1000000 + "ms");
 
 		} catch (Exception e) {
 			e.printStackTrace();
 		}
 
-		// QUERY DATA
+		// QUERY ALL DATA
 		try (Session session = cluster.connect()) {
 			start = System.nanoTime();
 			ResultSet rs = executeStatement(session, "SELECT * FROM " + KEYSPACE + "." + TABLENAME);
 			stop = System.nanoTime();
 			diff = stop - start;
-			
+
 			System.err.println("Select query returned + " + rs.all().size() + " rows");
 			System.err.println(getStats(rs));
-			System.err.println("Data created in " + diff);
+			System.err.println("Data query in " + diff / 1000000 + "ms");
+
+		} catch (Exception e) {
+			e.printStackTrace();
+		}
+
+		// QUERY ONE DATA
+		try (Session session = cluster.connect()) {
+			int randomNum = random.nextInt(ENTRY_COUNT);
+			String movieName = movieNames.get(randomNum);
+			LocalDate date = dates.get(randomNum);
+			start = System.nanoTime();
+			ResultSet rs = executeStatement(session, "SELECT * FROM " + KEYSPACE + "." + TABLENAME + " where name = '"
+					+ movieName + "' and online_date = '" + date + "' ALLOW FILTERING");
+			stop = System.nanoTime();
+			diff = stop - start;
+
+			System.err.println("Select query returned + " + randomNum + " rows");
+			System.err.println(getStats(rs));
+			System.err.println("Data query in " + diff / 1000000 + "ms");
+
+		} catch (Exception e) {
+			e.printStackTrace();
+		}
+
+		// QUERY PARTIAL DATA
+		try (Session session = cluster.connect()) {
+			int randomNum = random.nextInt(ENTRY_COUNT);
+			String movieName = movieNames.get(randomNum);
+			start = System.nanoTime();
+			ResultSet rs = executeStatement(session, "SELECT * FROM " + KEYSPACE + "." + TABLENAME + " where name = '"
+					+ movieName + "' ALLOW FILTERING");
+			stop = System.nanoTime();
+			diff = stop - start;
+
+			System.err.println("Select query returned + " + randomNum + " rows");
+			System.err.println(getStats(rs));
+			System.err.println("Data query in " + diff / 1000000 + "ms");
 
 		} catch (Exception e) {
 			e.printStackTrace();
@@ -162,7 +198,8 @@ public class CassandraTester {
 			names.add(new BigInteger(32, random).toString(32));
 		}
 
-		System.err.println("Generated names : " + Arrays.toString(names.toArray(new String[0])));
+		// System.err.println("Generated names : " +
+		// Arrays.toString(names.toArray(new String[0])));
 
 		return names;
 	}
@@ -173,7 +210,8 @@ public class CassandraTester {
 			names.add(new BigInteger(16, random).toString(16));
 		}
 
-		System.err.println("Generated names : " + Arrays.toString(names.toArray(new String[0])));
+		// System.err.println("Generated names : " +
+		// Arrays.toString(names.toArray(new String[0])));
 
 		return names;
 	}
@@ -185,7 +223,8 @@ public class CassandraTester {
 			ages.add(r.nextInt(80));
 		}
 
-		System.err.println("Generated ages : " + Arrays.toString(ages.toArray()));
+		// System.err.println("Generated ages : " +
+		// Arrays.toString(ages.toArray()));
 
 		return ages;
 	}
@@ -203,7 +242,7 @@ public class CassandraTester {
 					: latest.plus(day.nextInt(3650), ChronoUnit.DAYS);
 			dateSet.add(date);
 
-			System.err.println("Generated " + date.toString());
+			// System.err.println("Generated " + date.toString());
 		}
 
 		return dateSet;
@@ -225,7 +264,7 @@ public class CassandraTester {
 
 		return schema;
 	}
-	
+
 	public static String createTable() {
 		String schema = "CREATE TABLE " + KEYSPACE + "." + TABLENAME + " (" + "id int," + "name ascii,"
 				+ "online_date timestamp," + "act_list list<frozen <" + TYPENAME + ">>," + "PRIMARY KEY (id, name)) ";
@@ -234,7 +273,7 @@ public class CassandraTester {
 
 		return schema;
 	}
-	
+
 	public static String dropSchema() {
 		String schema = "DROP KEYSPACE IF EXISTS " + KEYSPACE + ";";
 		System.err.println("Drop schema:\n" + schema);
@@ -243,10 +282,8 @@ public class CassandraTester {
 	}
 
 	public static String createInsertStatement() {
-		String stmt = "INSERT INTO " + KEYSPACE + "." + TABLENAME + 
-					  " (id, name, online_date, act_list)" +
-				      " VALUES " + 
-					  "(?, ?, ?, ?)";
+		String stmt = "INSERT INTO " + KEYSPACE + "." + TABLENAME + " (id, name, online_date, act_list)" + " VALUES "
+				+ "(?, ?, ?, ?)";
 
 		return stmt;
 	}
