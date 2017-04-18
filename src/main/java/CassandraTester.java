@@ -42,7 +42,7 @@ public class CassandraTester {
 	public static final String KEYSPACE = "perf_test";
 	public static final String TABLENAME = "movie";
 	public static final int ENTRY_COUNT = 10000;
-	public static final int QUERY_COUNT = 10000;
+	public static final int QUERY_COUNT = 10;
 	public static final String TYPENAME = "act_info";
 
 	private static final Map<String, PreparedStatement> cachedStatements = new HashMap<>();
@@ -118,24 +118,24 @@ public class CassandraTester {
 			e.printStackTrace();
 		}
 
-		// QUERY ONE DATA
+		// QUERY NON-KEY DATA
 		try (Session session = cluster.connect()) {
 			long total = 0;
-			for(int i = 0 ; i < QUERY_COUNT; i++){
+			for (int i = 0; i < QUERY_COUNT; i++) {
 				int randomNum = random.nextInt(ENTRY_COUNT);
-				String movieName = movieNames.get(randomNum);
-				LocalDate date = dates.get(randomNum);
 				start = System.nanoTime();
-				ResultSet rs = executeStatement(session, "SELECT * FROM " + KEYSPACE + "." + TABLENAME + " where name = '"
-						+ movieName + "' and online_date = '" + date + "'");
+				ResultSet rs = executeStatement(session, "SELECT * FROM " + KEYSPACE + "." + TABLENAME + " where id = "
+						+ randomNum + " ALLOW FILTERING");
 				stop = System.nanoTime();
-				System.err.println("Select query returned + " + randomNum + " rows");
-				//System.err.println(getStats(rs));
+
+				// System.err.println("Select query returned + " + randomNum + "
+				// rows");
+				// System.err.println(getStats(rs));
 				diff = stop - start;
 				total += diff;
 			}
 
-			System.err.println("Data query in " + total / QUERY_COUNT / 1000000 + "ms");
+			System.err.println("Data query in " + total / QUERY_COUNT + "ms");
 
 		} catch (Exception e) {
 			e.printStackTrace();
@@ -143,21 +143,47 @@ public class CassandraTester {
 
 		// QUERY PARTIAL DATA
 		try (Session session = cluster.connect()) {
-				long total = 0;
-				for(int i = 0 ; i < QUERY_COUNT; i++){
+			long total = 0;
+			for (int i = 0; i < QUERY_COUNT; i++) {
 				int randomNum = random.nextInt(ENTRY_COUNT);
 				String movieName = movieNames.get(randomNum);
 				start = System.nanoTime();
-				ResultSet rs = executeStatement(session, "SELECT * FROM " + KEYSPACE + "." + TABLENAME + " where name = '"
-						+ movieName + "' ALLOW FILTERING");
+				ResultSet rs = executeStatement(session, "SELECT * FROM " + KEYSPACE + "." + TABLENAME
+						+ " where name = '" + movieName + "' ALLOW FILTERING");
 				stop = System.nanoTime();
-	
-				System.err.println("Select query returned + " + randomNum + " rows");
-				//System.err.println(getStats(rs));
-				diff = stop - start;total += diff;
+
+				// System.err.println("Select query returned + " + randomNum + "
+				// rows");
+				// System.err.println(getStats(rs));
+				diff = stop - start;
+				total += diff;
 			}
 
-			System.err.println("Data query in " + total / QUERY_COUNT / 1000000 + "ms");
+			System.err.println("Data query in " + total / QUERY_COUNT + "ms");
+
+		} catch (Exception e) {
+			e.printStackTrace();
+		}
+
+		// QUERY ONE DATA
+		try (Session session = cluster.connect()) {
+			long total = 0;
+			for (int i = 0; i < QUERY_COUNT; i++) {
+				int randomNum = random.nextInt(ENTRY_COUNT);
+				String movieName = movieNames.get(randomNum);
+				LocalDate date = dates.get(randomNum);
+				start = System.nanoTime();
+				ResultSet rs = executeStatement(session, "SELECT * FROM " + KEYSPACE + "." + TABLENAME
+						+ " where name = '" + movieName + "' and online_date = '" + date + "'");
+				stop = System.nanoTime();
+				// System.err.println("Select query returned + " + randomNum + "
+				// rows");
+				// System.err.println(getStats(rs));
+				diff = stop - start;
+				total += diff;
+			}
+
+			System.err.println("Data query in " + total / QUERY_COUNT + "ms");
 
 		} catch (Exception e) {
 			e.printStackTrace();
@@ -276,7 +302,9 @@ public class CassandraTester {
 
 	public static String createTable() {
 		String schema = "CREATE TABLE " + KEYSPACE + "." + TABLENAME + " (" + "id int," + "name ascii,"
-				+ "online_date timestamp," + "act_list list<frozen <" + TYPENAME + ">>," + "PRIMARY KEY (name, online_date)) ";
+				+ "online_date timestamp," + "act_list list<frozen <" + TYPENAME + ">>,"
+				+ "PRIMARY KEY (name, online_date)) "
+				+ " WITH caching = { 'keys' : 'ALL', 'rows_per_partition' : '120' };";
 
 		System.err.println("Creating schema:\n" + schema);
 
